@@ -44,7 +44,7 @@ export default function Home() {
     <div className="space-y-8">
       <div className="text-center mb-12">
         <h1 className="text-5xl font-bold text-gray-800 mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-          ¡Bienvenido! Welcome!
+          ¡Bienvenido!
         </h1>
         <p className="text-xl text-gray-600 max-w-2xl mx-auto">
           Master Spanish vocabulary with interactive flashcards. Create decks, study smart, and track your progress.
