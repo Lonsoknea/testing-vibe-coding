@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { Card, CardStat, Deck } from '../types';
+import type { Card } from '../types';
 import { db } from '../services/database';
+import { useDeck } from '../hooks/useDeck';
+import { useCards } from '../hooks/useCards';
+import { useCardStats } from '../hooks/useCardStats';
+import { shuffleArray, toEnglishText } from '../utils/arrayUtils';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function QuizPage() {
   const { deckId } = useParams<{ deckId: string }>();
-
-  const [deck, setDeck] = useState<Deck | null>(null);
+  const { deck, loading: deckLoading, error: deckError } = useDeck(deckId);
+  const { cards: originalCards, loading: cardsLoading, error: cardsError } = useCards(deckId);
+  const { saveCardStat } = useCardStats();
   const [cards, setCards] = useState<Card[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -16,14 +22,15 @@ export default function QuizPage() {
   const choicesPerQuestion = 4;
 
   useEffect(() => {
-    if (!deckId) return;
-    (async () => {
-      const decks = await db.getDecks();
-      setDeck(decks.find(d => d.id === deckId) || null);
-      const c = await db.getCards(deckId);
-      setCards(shuffleArray(c));
-    })();
-  }, [deckId]);
+    if (originalCards.length > 0) {
+      setCards(shuffleArray(originalCards));
+      setCurrentIndex(0);
+      setSelected(null);
+      setShowFeedback(false);
+      setScore(0);
+      setFinished(false);
+    }
+  }, [originalCards]);
 
   const currentCard = cards[currentIndex];
 
@@ -44,9 +51,16 @@ export default function QuizPage() {
     if (showFeedback) return;
     setSelected(opt);
     const correct = isCorrect(opt);
-    await recordStat(currentCard, correct);
-    if (correct) setScore(s => s + 1);
-    setShowFeedback(true);
+    try {
+      await saveCardStat(currentCard, correct);
+      if (correct) setScore(s => s + 1);
+      setShowFeedback(true);
+    } catch (error) {
+      console.error('Failed to save card statistics:', error);
+      // Still show feedback even if stats save fails
+      if (correct) setScore(s => s + 1);
+      setShowFeedback(true);
+    }
   };
 
   const nextQuestion = () => {
@@ -58,6 +72,27 @@ export default function QuizPage() {
       setFinished(true);
     }
   };
+
+  if (deckLoading || cardsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <LoadingSpinner size="lg" text="Loading quiz..." />
+      </div>
+    );
+  }
+
+  if (deckError || cardsError) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <span className="text-3xl">⚠️</span>
+        </div>
+        <h3 className="text-2xl font-bold text-gray-700 mb-4">Failed to load quiz</h3>
+        <p className="text-gray-500 text-lg mb-8">{deckError || cardsError}</p>
+        <Link to="/" className="text-blue-600 hover:text-blue-700">Back to Home</Link>
+      </div>
+    );
+  }
 
   if (!deck) {
     return (
@@ -145,31 +180,3 @@ export default function QuizPage() {
   );
 }
 
-function shuffleArray<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-function toEnglishText(english: string | string[]): string {
-  return Array.isArray(english) ? english[0] : english;
-}
-
-async function recordStat(card: Card, correct: boolean) {
-  const existingStat = await db.getCardStats(card.id);
-  const newStat: CardStat = {
-    cardId: card.id,
-    attempts: (existingStat?.attempts || 0) + 1,
-    correct: (existingStat?.correct || 0) + (correct ? 1 : 0),
-    incorrect: (existingStat?.incorrect || 0) + (correct ? 0 : 1),
-    lastSeen: new Date().toISOString(),
-    history: [
-      ...(existingStat?.history || []).slice(-19),
-      { at: new Date().toISOString(), correct }
-    ]
-  };
-  await db.saveCardStat(newStat);
-}

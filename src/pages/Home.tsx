@@ -1,44 +1,77 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Deck } from '../types';
 import { db } from '../services/database';
+import { useDecks } from '../hooks/useDecks';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function Home() {
-  const [decks, setDecks] = useState<Deck[]>([]);
+  const { decks, loading, error, refetch } = useDecks();
   const [newDeckName, setNewDeckName] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
-
-  useEffect(() => {
-    loadDecks();
-  }, []);
-
-  const loadDecks = async () => {
-    const decksData = await db.getDecks();
-    setDecks(decksData);
-  };
+  const [isCreating, setIsCreating] = useState(false);
 
   const createDeck = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDeckName.trim()) return;
+    if (!newDeckName.trim() || isCreating) return;
 
-    const newDeck: Deck = {
-      id: crypto.randomUUID(),
-      name: newDeckName.trim(),
-      createdAt: new Date().toISOString(),
-    };
+    setIsCreating(true);
+    try {
+      const newDeck: Deck = {
+        id: crypto.randomUUID(),
+        name: newDeckName.trim(),
+        createdAt: new Date().toISOString(),
+      };
 
-    await db.saveDeck(newDeck);
-    setNewDeckName('');
-    setShowCreateForm(false);
-    loadDecks();
+      await db.saveDeck(newDeck);
+      setNewDeckName('');
+      setShowCreateForm(false);
+      await refetch();
+    } catch (error) {
+      console.error('Failed to create deck:', error);
+      alert('Failed to create deck. Please try again.');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const deleteDeck = async (deckId: string) => {
     if (window.confirm('Are you sure you want to delete this deck? This will also delete all cards in the deck.')) {
-      await db.deleteDeck(deckId);
-      loadDecks();
+      try {
+        await db.deleteDeck(deckId);
+        await refetch();
+      } catch (error) {
+        console.error('Failed to delete deck:', error);
+        alert('Failed to delete deck. Please try again.');
+      }
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <LoadingSpinner size="lg" text="Loading decks..." />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <span className="text-3xl">⚠️</span>
+        </div>
+        <h3 className="text-2xl font-bold text-gray-700 mb-4">Failed to load decks</h3>
+        <p className="text-gray-500 text-lg mb-8">{error}</p>
+        <button
+          onClick={refetch}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+        >
+          🔄 Try Again
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -83,14 +116,23 @@ export default function Home() {
             <div className="flex space-x-4">
               <button
                 type="submit"
-                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                disabled={isCreating}
+                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center"
               >
-                ✨ Create Deck
+                {isCreating ? (
+                  <>
+                    <LoadingSpinner size="sm" />
+                    <span className="ml-2">Creating...</span>
+                  </>
+                ) : (
+                  '✨ Create Deck'
+                )}
               </button>
               <button
                 type="button"
                 onClick={() => setShowCreateForm(false)}
-                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-semibold transition-all duration-200"
+                disabled={isCreating}
+                className="flex-1 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed text-gray-700 px-6 py-3 rounded-xl font-semibold transition-all duration-200"
               >
                 Cancel
               </button>

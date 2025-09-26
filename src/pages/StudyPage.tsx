@@ -1,46 +1,33 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import type { Deck, Card, CardStat } from '../types';
+import type { Card } from '../types';
 import { db } from '../services/database';
+import { useDeck } from '../hooks/useDeck';
+import { useCards } from '../hooks/useCards';
+import { useCardStats } from '../hooks/useCardStats';
+import { shuffleArray } from '../utils/arrayUtils';
 import Flashcard from '../components/Flashcard';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function StudyPage() {
   const { deckId } = useParams<{ deckId: string }>();
   const navigate = useNavigate();
-  const [deck, setDeck] = useState<Deck | null>(null);
+  const { deck, loading: deckLoading, error: deckError } = useDeck(deckId);
+  const { cards: originalCards, loading: cardsLoading, error: cardsError, refetch: refetchCards } = useCards(deckId);
+  const { saveCardStat, loading: statsLoading } = useCardStats();
   const [cards, setCards] = useState<Card[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sessionWrongCards, setSessionWrongCards] = useState<Set<string>>(new Set());
   const [isRedoMode, setIsRedoMode] = useState(false);
 
   useEffect(() => {
-    if (deckId) {
-      loadDeck();
-      loadCards();
+    if (originalCards.length > 0) {
+      setCards(shuffleArray(originalCards));
+      setCurrentIndex(0);
+      setSessionWrongCards(new Set());
+      setIsRedoMode(false);
     }
-  }, [deckId]);
-
-  const loadDeck = async () => {
-    if (!deckId) return;
-    const decks = await db.getDecks();
-    const foundDeck = decks.find(d => d.id === deckId);
-    setDeck(foundDeck || null);
-  };
-
-  const loadCards = async () => {
-    if (!deckId) return;
-    const cardsData = await db.getCards(deckId);
-    setCards(cardsData);
-  };
-
-  const shuffleArray = <T,>(array: T[]): T[] => {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-  };
+  }, [originalCards]);
 
   const startRedoMode = () => {
     if (sessionWrongCards.size === 0) {
@@ -53,8 +40,8 @@ export default function StudyPage() {
     setIsRedoMode(true);
   };
 
-  const exitRedoMode = () => {
-    loadCards();
+  const exitRedoMode = async () => {
+    await refetchCards();
     setCurrentIndex(0);
     setIsRedoMode(false);
   };
@@ -63,50 +50,42 @@ export default function StudyPage() {
     const card = cards[currentIndex];
     if (!card) return;
 
-    // Update card stats
-    const existingStat = await db.getCardStats(card.id);
-    const newStat: CardStat = {
-      cardId: card.id,
-      attempts: (existingStat?.attempts || 0) + 1,
-      correct: (existingStat?.correct || 0) + (correct ? 1 : 0),
-      incorrect: (existingStat?.incorrect || 0) + (correct ? 0 : 1),
-      lastSeen: new Date().toISOString(),
-      history: [
-        ...(existingStat?.history || []).slice(-19), // Keep last 20 entries
-        { at: new Date().toISOString(), correct }
-      ]
-    };
+    try {
+      // Update card stats
+      await saveCardStat(card, correct);
 
-    await db.saveCardStat(newStat);
-
-    // Update card needsReview flag
-    if (!correct) {
-      const updatedCard = { ...card, needsReview: true };
-      await db.saveCard(updatedCard);
-      setSessionWrongCards(prev => new Set([...prev, card.id]));
-    } else if (isRedoMode) {
-      // In redo mode, mark as no longer needing review
-      const updatedCard = { ...card, needsReview: false };
-      await db.saveCard(updatedCard);
-      setSessionWrongCards(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(card.id);
-        return newSet;
-      });
-    }
-
-    // Move to next card
-    if (currentIndex < cards.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      // End of session
-      if (isRedoMode) {
-        alert('Redo session complete! All wrong cards have been reviewed.');
-        exitRedoMode();
-      } else {
-        alert('Study session complete!');
-        navigate(`/deck/${deckId}`);
+      // Update card needsReview flag
+      if (!correct) {
+        const updatedCard = { ...card, needsReview: true };
+        await db.saveCard(updatedCard);
+        setSessionWrongCards(prev => new Set([...prev, card.id]));
+      } else if (isRedoMode) {
+        // In redo mode, mark as no longer needing review
+        const updatedCard = { ...card, needsReview: false };
+        await db.saveCard(updatedCard);
+        setSessionWrongCards(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(card.id);
+          return newSet;
+        });
       }
+
+      // Move to next card
+      if (currentIndex < cards.length - 1) {
+        setCurrentIndex(currentIndex + 1);
+      } else {
+        // End of session
+        if (isRedoMode) {
+          alert('Redo session complete! All wrong cards have been reviewed.');
+          await exitRedoMode();
+        } else {
+          alert('Study session complete!');
+          navigate(`/deck/${deckId}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save card statistics:', error);
+      alert('Failed to save progress. Please try again.');
     }
   };
 
@@ -121,6 +100,29 @@ export default function StudyPage() {
       setCurrentIndex(currentIndex - 1);
     }
   };
+
+  if (deckLoading || cardsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <LoadingSpinner size="lg" text="Loading study session..." />
+      </div>
+    );
+  }
+
+  if (deckError || cardsError) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <span className="text-3xl">⚠️</span>
+        </div>
+        <h3 className="text-2xl font-bold text-gray-700 mb-4">Failed to load study session</h3>
+        <p className="text-gray-500 text-lg mb-8">{deckError || cardsError}</p>
+        <Link to="/" className="text-blue-600 hover:text-blue-700">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
 
   if (!deck) {
     return (

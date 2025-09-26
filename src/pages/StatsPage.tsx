@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../services/database';
+import { useDecks } from '../hooks/useDecks';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 interface DeckStats {
   deckId: string;
@@ -12,54 +14,85 @@ interface DeckStats {
 }
 
 export default function StatsPage() {
+  const { decks, loading: decksLoading, error: decksError, refetch: refetchDecks } = useDecks();
   const [deckStats, setDeckStats] = useState<DeckStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadStats();
-  }, []);
+    if (decks.length > 0) {
+      loadStats();
+    }
+  }, [decks]);
 
   const loadStats = async () => {
     setLoading(true);
-    const decks = await db.getDecks();
-    const stats: DeckStats[] = [];
+    setError(null);
+    
+    try {
+      const stats: DeckStats[] = [];
 
-    for (const deck of decks) {
-      const cards = await db.getCards(deck.id);
-      let totalAttempts = 0;
-      let correctAnswers = 0;
-      let incorrectAnswers = 0;
+      for (const deck of decks) {
+        const cards = await db.getCards(deck.id);
+        let totalAttempts = 0;
+        let correctAnswers = 0;
+        let incorrectAnswers = 0;
 
-      for (const card of cards) {
-        const cardStat = await db.getCardStats(card.id);
-        if (cardStat) {
-          totalAttempts += cardStat.attempts;
-          correctAnswers += cardStat.correct;
-          incorrectAnswers += cardStat.incorrect;
+        for (const card of cards) {
+          const cardStat = await db.getCardStats(card.id);
+          if (cardStat) {
+            totalAttempts += cardStat.attempts;
+            correctAnswers += cardStat.correct;
+            incorrectAnswers += cardStat.incorrect;
+          }
         }
+
+        const accuracy = totalAttempts > 0 ? (correctAnswers / totalAttempts) * 100 : 0;
+
+        stats.push({
+          deckId: deck.id,
+          deckName: deck.name,
+          totalCards: cards.length,
+          totalAttempts,
+          correctAnswers,
+          incorrectAnswers,
+          accuracy: Math.round(accuracy * 100) / 100
+        });
       }
 
-      const accuracy = totalAttempts > 0 ? (correctAnswers / totalAttempts) * 100 : 0;
-
-      stats.push({
-        deckId: deck.id,
-        deckName: deck.name,
-        totalCards: cards.length,
-        totalAttempts,
-        correctAnswers,
-        incorrectAnswers,
-        accuracy: Math.round(accuracy * 100) / 100
-      });
+      setDeckStats(stats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load statistics');
+    } finally {
+      setLoading(false);
     }
-
-    setDeckStats(stats);
-    setLoading(false);
   };
 
-  if (loading) {
+  if (decksLoading || loading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <LoadingSpinner size="lg" text="Loading statistics..." />
+      </div>
+    );
+  }
+
+  if (decksError || error) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500 text-lg">Loading statistics...</p>
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <span className="text-3xl">⚠️</span>
+        </div>
+        <h3 className="text-2xl font-bold text-gray-700 mb-4">Failed to load statistics</h3>
+        <p className="text-gray-500 text-lg mb-8">{decksError || error}</p>
+        <button
+          onClick={() => {
+            refetchDecks();
+            loadStats();
+          }}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+        >
+          🔄 Try Again
+        </button>
       </div>
     );
   }
@@ -74,7 +107,10 @@ export default function StatsPage() {
           Track your learning progress and see how well you're mastering Spanish vocabulary.
         </p>
         <button
-          onClick={loadStats}
+          onClick={() => {
+            refetchDecks();
+            loadStats();
+          }}
           className="mt-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
         >
           🔄 Refresh Stats

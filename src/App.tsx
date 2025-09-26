@@ -4,6 +4,7 @@ import DeckPage from './pages/DeckPage';
 import StudyPage from './pages/StudyPage';
 import QuizPage from './pages/QuizPage';
 import StatsPage from './pages/StatsPage';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
   return (
@@ -31,13 +32,15 @@ function App() {
         </nav>
 
         <main className="max-w-7xl mx-auto py-8 sm:px-6 lg:px-8">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/deck/:deckId" element={<DeckPage />} />
-            <Route path="/deck/:deckId/study" element={<StudyPage />} />
-            <Route path="/deck/:deckId/quiz" element={<QuizPage />} />
-            <Route path="/stats" element={<StatsPage />} />
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/deck/:deckId" element={<DeckPage />} />
+              <Route path="/deck/:deckId/study" element={<StudyPage />} />
+              <Route path="/deck/:deckId/quiz" element={<QuizPage />} />
+              <Route path="/stats" element={<StatsPage />} />
+            </Routes>
+          </ErrorBoundary>
         </main>
       </div>
     </Router>

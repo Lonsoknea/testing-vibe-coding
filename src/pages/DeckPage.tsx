@@ -1,62 +1,81 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import type { Deck, Card } from '../types';
+import type { Card } from '../types';
 import { db } from '../services/database';
+import { useDeck } from '../hooks/useDeck';
+import { useCards } from '../hooks/useCards';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function DeckPage() {
   const { deckId } = useParams<{ deckId: string }>();
-  // const navigate = useNavigate();
-  const [deck, setDeck] = useState<Deck | null>(null);
-  const [cards, setCards] = useState<Card[]>([]);
+  const { deck, loading: deckLoading, error: deckError } = useDeck(deckId);
+  const { cards, loading: cardsLoading, error: cardsError, refetch: refetchCards } = useCards(deckId);
   const [newCardSpanish, setNewCardSpanish] = useState('');
   const [newCardEnglish, setNewCardEnglish] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
-
-  useEffect(() => {
-    if (deckId) {
-      loadDeck();
-      loadCards();
-    }
-  }, [deckId]);
-
-  const loadDeck = async () => {
-    if (!deckId) return;
-    const decks = await db.getDecks();
-    const foundDeck = decks.find(d => d.id === deckId);
-    setDeck(foundDeck || null);
-  };
-
-  const loadCards = async () => {
-    if (!deckId) return;
-    const cardsData = await db.getCards(deckId);
-    setCards(cardsData);
-  };
+  const [isCreating, setIsCreating] = useState(false);
 
   const createCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCardSpanish.trim() || !newCardEnglish.trim() || !deckId) return;
+    if (!newCardSpanish.trim() || !newCardEnglish.trim() || !deckId || isCreating) return;
 
-    const newCard: Card = {
-      id: crypto.randomUUID(),
-      deckId,
-      spanish: newCardSpanish.trim(),
-      english: newCardEnglish.trim(),
-      createdAt: new Date().toISOString(),
-    };
+    setIsCreating(true);
+    try {
+      const newCard: Card = {
+        id: crypto.randomUUID(),
+        deckId,
+        spanish: newCardSpanish.trim(),
+        english: newCardEnglish.trim(),
+        createdAt: new Date().toISOString(),
+      };
 
-    await db.saveCard(newCard);
-    setNewCardSpanish('');
-    setNewCardEnglish('');
-    setShowCreateForm(false);
-    loadCards();
+      await db.saveCard(newCard);
+      setNewCardSpanish('');
+      setNewCardEnglish('');
+      setShowCreateForm(false);
+      await refetchCards();
+    } catch (error) {
+      console.error('Failed to create card:', error);
+      alert('Failed to create card. Please try again.');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const deleteCard = async (cardId: string) => {
     if (window.confirm('Are you sure you want to delete this card?')) {
-      await db.deleteCard(cardId);
-      loadCards();
+      try {
+        await db.deleteCard(cardId);
+        await refetchCards();
+      } catch (error) {
+        console.error('Failed to delete card:', error);
+        alert('Failed to delete card. Please try again.');
+      }
     }
   };
+
+  if (deckLoading || cardsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <LoadingSpinner size="lg" text="Loading deck..." />
+      </div>
+    );
+  }
+
+  if (deckError || cardsError) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <span className="text-3xl">⚠️</span>
+        </div>
+        <h3 className="text-2xl font-bold text-gray-700 mb-4">Failed to load deck</h3>
+        <p className="text-gray-500 text-lg mb-8">{deckError || cardsError}</p>
+        <Link to="/" className="text-blue-600 hover:text-blue-700">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
 
   if (!deck) {
     return (
@@ -136,14 +155,23 @@ export default function DeckPage() {
             <div className="flex space-x-4">
               <button
                 type="submit"
-                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                disabled={isCreating}
+                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center"
               >
-                ✨ Add Card
+                {isCreating ? (
+                  <>
+                    <LoadingSpinner size="sm" />
+                    <span className="ml-2">Adding...</span>
+                  </>
+                ) : (
+                  '✨ Add Card'
+                )}
               </button>
               <button
                 type="button"
                 onClick={() => setShowCreateForm(false)}
-                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-semibold transition-all duration-200"
+                disabled={isCreating}
+                className="flex-1 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed text-gray-700 px-6 py-3 rounded-xl font-semibold transition-all duration-200"
               >
                 Cancel
               </button>
