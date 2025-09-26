@@ -38,3 +38,6 @@ coverage/
 /test-results/
 /playwright-report/
 /blob-report/
+
+# MCP configuration files
+mcp.json
